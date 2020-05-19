@@ -11,7 +11,7 @@ BSD license, check license.txt for more information
 
 // Color depth per primary color - the more the slower the update
 #ifndef PxMATRIX_COLOR_DEPTH
-#define PxMATRIX_COLOR_DEPTH 4
+#define PxMATRIX_COLOR_DEPTH 1
 #endif
 
 #if PxMATRIX_COLOR_DEPTH > 8 || PxMATRIX_COLOR_DEPTH < 1
@@ -20,12 +20,12 @@ BSD license, check license.txt for more information
 
 // Defines the buffer height / the maximum height of the matrix
 #ifndef PxMATRIX_MAX_HEIGHT
-#define PxMATRIX_MAX_HEIGHT 64
+#define PxMATRIX_MAX_HEIGHT 32
 #endif
 
 // Defines the buffer width / the maximum width of the matrix
 #ifndef PxMATRIX_MAX_WIDTH
-#define PxMATRIX_MAX_WIDTH 64
+#define PxMATRIX_MAX_WIDTH 32
 #endif
 
 // Defines how long we display things by default
@@ -53,12 +53,6 @@ BSD license, check license.txt for more information
   #define SPI_2BYTE(x) SPI.write16(x)
 #endif
 
-#ifdef __AVR__
-  #define SPI_TRANSFER(x,y) SPI.transfer(x,y)
-  #define SPI_BYTE(x) SPI.transfer(x)
-  #define SPI_2BYTE(x) SPI.transfer16(x)
-#endif
-
 #include "Adafruit_GFX.h"
 #include "Arduino.h"
 #include <SPI.h>
@@ -68,12 +62,6 @@ BSD license, check license.txt for more information
 #else
 #include "WProgram.h"
 #endif
-
-#ifdef __AVR__
-#include <util/delay.h>
-#endif
-
-
 
 #include <stdlib.h>
 
@@ -92,10 +80,6 @@ BSD license, check license.txt for more information
 #ifdef ESP32
   #define GPIO_REG_SET(val) GPIO.out_w1ts = val
   #define GPIO_REG_CLEAR(val) GPIO.out_w1tc = val
-#endif
-#ifdef __AVR__
-  #define GPIO_REG_SET(val) (val < 8) ? PORTD |= _BV(val) : PORTB |= _BV(val-8)
-  #define GPIO_REG_CLEAR(val) (val < 8) ? PORTD &= ~_BV(val) : PORTB &= ~_BV(val-8)
 #endif
 
 #ifdef ESP32
@@ -142,7 +126,7 @@ enum color_orders {RRGGBB, RRBBGG, GGRRBB, GGBBRR, BBRRGG, BBGGRR};
 #define color_third_step (int(color_step / 3))
 #define color_two_third_step (int(color_third_step*2))
 
-#define buffer_size (max_matrix_pixels * 3 / 8)
+#define buffer_size (max_matrix_pixels / 8)
 
 class PxMATRIX : public Adafruit_GFX {
  public:
@@ -163,17 +147,17 @@ class PxMATRIX : public Adafruit_GFX {
   inline void display();
 
   // Draw pixels
-  inline void drawPixelRGB565(int16_t x, int16_t y, uint16_t color);
+  inline void drawPixelR5(int16_t x, int16_t y, uint16_t color);
 
   inline void drawPixel(int16_t x, int16_t y, uint16_t color);
 
-  inline void drawPixelRGB888(int16_t x, int16_t y, uint8_t r, uint8_t g,uint8_t b);
+  inline void drawPixelR8(int16_t x, int16_t y, uint8_t r);
 
   // Does nothing for now (always returns 0)
   uint8_t getPixel(int8_t x, int8_t y);
 
   // Converts RGB888 to RGB565
-  uint16_t color565(uint8_t r, uint8_t g, uint8_t b);
+  uint16_t color5(uint8_t r);
 
   // Helpful for debugging (place in display update loop)
   inline void displayTestPattern(uint16_t showtime);
@@ -197,7 +181,7 @@ class PxMATRIX : public Adafruit_GFX {
   inline void showBuffer();
 
   // Control the minimum color values that result in an active pixel
-  inline void setColorOffset(uint8_t r, uint8_t g,uint8_t b);
+  inline void setColorOffset(uint8_t r);
 
   // Set the multiplex implemention {BINARY, STRAIGHT, SHIFTREG} (default is BINARY)
   inline void setMuxPattern(mux_patterns mux_pattern);
@@ -253,8 +237,6 @@ class PxMATRIX : public Adafruit_GFX {
 
   // Color offset
   uint8_t _color_R_offset;
-  uint8_t _color_G_offset;
-  uint8_t _color_B_offset;
 
   // Panel Brightness
   uint8_t _brightness;
@@ -307,7 +289,7 @@ class PxMATRIX : public Adafruit_GFX {
   unsigned long _test_last_call;
 
   // Generic function that draw one pixel
-inline void fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t g,uint8_t b, bool selected_buffer);
+inline void fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, bool selected_buffer);
 
   // Init code common to both constructors
 inline void init(uint16_t width, uint16_t height ,uint8_t LATCH, uint8_t OE, uint8_t A,uint8_t B);
@@ -326,8 +308,8 @@ inline void fm612xWriteRegister(uint16_t reg_value, uint8_t reg_position);
 };
 
 // Pass 8-bit (each) R,G,B, get back 16-bit packed color
-inline uint16_t PxMATRIX::color565(uint8_t r, uint8_t g, uint8_t b) {
-  return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+inline uint16_t PxMATRIX::color5(uint8_t r) {
+  return ((r & 0xF8) << 8);
 }
 
 // Init code common to both constructors
@@ -362,9 +344,7 @@ inline void PxMATRIX::init(uint16_t width, uint16_t height,uint8_t LATCH, uint8_
   _active_buffer=false;
 
   _color_R_offset=0;
-  _color_G_offset=0;
-  _color_B_offset=0;
-
+  
   _test_last_call=0;
   _test_pixel_counter=0;
   _test_line_counter=0;
@@ -613,36 +593,25 @@ inline PxMATRIX::PxMATRIX(uint16_t width, uint16_t height,uint8_t LATCH, uint8_t
 }
 
 inline void PxMATRIX::drawPixel(int16_t x, int16_t y, uint16_t color) {
-  drawPixelRGB565(x, y, color);
+  drawPixelR5(x, y, color);
 }
 
 inline void PxMATRIX::showBuffer() {
   _active_buffer=!_active_buffer;
 }
 
-inline void PxMATRIX::setColorOffset(uint8_t r, uint8_t g,uint8_t b)
+inline void PxMATRIX::setColorOffset(uint8_t r)
 {
   if ((color_half_step+r)<0)
     r=-color_half_step;
   if ((color_half_step+r)>255)
       r=255-color_half_step;
 
-  if ((color_half_step+g)<0)
-    g=-color_half_step;
-  if ((color_half_step+g)>255)
-      g=255-color_half_step;
-
-  if ((color_half_step+b)<0)
-    b=-color_half_step;
-  if ((color_half_step+b)>255)
-      b=255-color_half_step;
-
     _color_R_offset=r;
-    _color_G_offset=g;
-    _color_B_offset=b;
+
 }
 
-inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t g, uint8_t b,bool selected_buffer)
+inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, bool selected_buffer)
 {
  
   if (_rotate){
@@ -658,28 +627,9 @@ inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t 
    if ((x < 0) || (x >= _width) || (y < 0) || (y >= _height))
     return;  
   
-  if (_color_order!= RRGGBB)
-  {
-    uint8_t r_temp=r;
-    uint8_t g_temp=g;
-    uint8_t b_temp=b;
-
-
-    switch (_color_order)
-    {
-      case (RRGGBB): break;
-      case (RRBBGG): g=b_temp; b=g_temp; break;
-      case (GGRRBB): r=g_temp; g=r_temp; break;
-      case (GGBBRR): r=g_temp; g=b_temp; b=r_temp; break;
-      case (BBRRGG): r=b_temp; g=r_temp; b=g_temp; break;
-      case (BBGGRR): r=b_temp; g=g_temp; b=r_temp; break;
-    }
-  }
-  
   uint32_t base_offset;
   uint32_t total_offset_r=0;
-  uint32_t total_offset_g=0;
-  uint32_t total_offset_b=0;
+
 
   if (_scan_pattern==WZAGZIG || _scan_pattern==VZAG)
   {
@@ -790,8 +740,6 @@ inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t 
     }
   }
 
-  total_offset_g=total_offset_r-_pattern_color_bytes;
-  total_offset_b=total_offset_g-_pattern_color_bytes;
 
   uint8_t (*PxMATRIX_bufferp)[PxMATRIX_COLOR_DEPTH][buffer_size] = &PxMATRIX_buffer;
 
@@ -800,8 +748,7 @@ inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t 
 #endif
 
   r = r >> (8-PxMATRIX_COLOR_DEPTH);
-  g = g >> (8-PxMATRIX_COLOR_DEPTH);
-  b = b >> (8-PxMATRIX_COLOR_DEPTH);
+
   
   //Color interlacing
   for (int this_color_bit=0; this_color_bit<PxMATRIX_COLOR_DEPTH; this_color_bit++)
@@ -811,34 +758,24 @@ inline void PxMATRIX::fillMatrixBuffer(int16_t x, int16_t y, uint8_t r, uint8_t 
     else
       (*PxMATRIX_bufferp)[this_color_bit][total_offset_r] &= ~_BV(bit_select);
 
-    if ((g >> this_color_bit) & 0x01)
-      (*PxMATRIX_bufferp)[this_color_bit][total_offset_g] |=_BV(bit_select);
-    else
-      (*PxMATRIX_bufferp)[this_color_bit][total_offset_g] &= ~_BV(bit_select);
-
-    if ((b >> this_color_bit) & 0x01)
-      (*PxMATRIX_bufferp)[this_color_bit][total_offset_b] |=_BV(bit_select);
-    else
-      (*PxMATRIX_bufferp)[this_color_bit][total_offset_b] &= ~_BV(bit_select);
   }
 }
 
-inline void PxMATRIX::drawPixelRGB565(int16_t x, int16_t y, uint16_t color) {
+inline void PxMATRIX::drawPixelR5(int16_t x, int16_t y, uint16_t color) {
   uint8_t r = ((((color >> 11) & 0x1F) * 527) + 23) >> 6;
-  uint8_t g = ((((color >> 5) & 0x3F) * 259) + 33) >> 6;
-  uint8_t b = (((color & 0x1F) * 527) + 23) >> 6;
+
 #ifdef PxMATRIX_DOUBLE_BUFFER
-  fillMatrixBuffer(x, y, r, g, b, !_active_buffer);
+  fillMatrixBuffer(x, y, r, !_active_buffer);
 #else
-  fillMatrixBuffer(x, y, r, g, b, false);
+  fillMatrixBuffer(x, y, r, false);
 #endif
 }
 
-inline void PxMATRIX::drawPixelRGB888(int16_t x, int16_t y, uint8_t r, uint8_t g,uint8_t b) {
+inline void PxMATRIX::drawPixelR8(int16_t x, int16_t y, uint8_t r) {
 #ifdef PxMATRIX_DOUBLE_BUFFER
-  fillMatrixBuffer(x, y, r, g, b, !_active_buffer);
+  fillMatrixBuffer(x, y, r, !_active_buffer);
 #else
-  fillMatrixBuffer(x, y, r, g, b, false);
+  fillMatrixBuffer(x, y, r, false);
 #endif
 }
 
